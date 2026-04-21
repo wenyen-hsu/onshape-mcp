@@ -418,47 +418,6 @@ def onshape_add_feature(
     return _summarize_feature_response(data)
 
 
-@mcp.tool()
-@_safe
-def onshape_post_feature_definition_call(
-    document_id: str,
-    workspace_id: str,
-    element_id: str,
-    body: Annotated[
-        dict,
-        "Full POST body for /features. Usually a BTFeatureDefinitionCall-1406, "
-        "but can carry extra keys like 'imports' alongside 'feature'. Use this "
-        "when the bare add_feature wrapper isn't enough (e.g. bootstrap-import "
-        "experiments).",
-    ],
-) -> dict:
-    """Low-level POST to `/partstudios/.../features` — dev/experimental escape hatch."""
-    data = client.post(
-        f"/api/v10/partstudios/d/{document_id}/w/{workspace_id}/e/{element_id}/features",
-        json=body,
-    )
-    return data
-
-
-@mcp.tool()
-@_safe
-def onshape_raw_post(
-    path: Annotated[str, "Full Onshape API path starting with /api/v10/..."],
-    body: dict | None = None,
-) -> dict:
-    """Low-level authenticated POST to any Onshape endpoint — dev/experimental."""
-    return client.post(path, json=body)
-
-
-@mcp.tool()
-@_safe
-def onshape_raw_get(
-    path: Annotated[str, "Full Onshape API path starting with /api/v10/..."],
-) -> dict:
-    """Low-level authenticated GET to any Onshape endpoint — dev/experimental."""
-    return client.get(path)
-
-
 def _is_error_notice(notice: dict) -> bool:
     level = (notice.get("level") or notice.get("severity") or "").upper()
     return level in {"ERROR", "FAIL", "FAILURE"}
