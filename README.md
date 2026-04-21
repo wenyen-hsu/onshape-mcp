@@ -34,8 +34,8 @@ parametric geometry from conversation.
 | `onshape_create_feature_studio` | Create a new empty Feature Studio element |
 | `onshape_get_feature_studio_code` | Read the FS source of a Feature Studio |
 | `onshape_update_feature_studio_code` | Replace FS source; returns compile notices |
-| `onshape_get_feature_studio_spec` | Get computed spec for every custom feature (use this to build `add_feature` payloads) |
-| `onshape_list_features` | List features in a Part Studio + each feature's regen status |
+| `onshape_get_feature_studio_spec` | Get all feature specs visible to a Part Studio (built-in + every imported custom feature). `element_id` is the **Part Studio** id. Use this to copy the canonical `featureTypeHash` / `namespace` into `add_feature` payloads |
+| `onshape_list_features` | List features in a Part Studio + each feature's regen status, the Part Studio's `imports[]`, and per-feature `namespace`. Pass `include_raw=True` for the full Onshape payload (parameters, defaultFeatures) — useful for reverse-engineering a custom-feature JSON shape |
 | `onshape_add_feature` | Add a feature to a Part Studio; surfaces FS regen errors |
 | `onshape_delete_feature` | Delete a single feature by id |
 
@@ -120,10 +120,27 @@ The recommended flow for asking Claude to build a parametric part:
 1. Parse an Onshape document URL → `onshape_parse_url` → yields `did` / `wid` / `eid`
 2. Locate (or create) a Feature Studio: `onshape_list_elements` → if none, `onshape_create_feature_studio`
 3. Claude writes FS source → `onshape_update_feature_studio_code`; inspect `notices` for compile errors and iterate
-4. Fetch the computed spec → `onshape_get_feature_studio_spec`. This returns the canonical `featureTypeHash`, `namespace`, and parameter schema — use these to build the `add_feature` payload. **Don't hand-assemble the payload.**
+4. Fetch the computed spec → `onshape_get_feature_studio_spec(element_id=<Part Studio id>)`. Returns every spec visible to that Part Studio — built-ins plus any Feature Studios the Part Studio has imported. Copy the canonical `featureTypeHash`, `namespace`, and parameter schema from here to build the `add_feature` payload. **Don't hand-assemble the payload** — namespace format is fragile and unspecified, misguesses return `400 invalid namespace`.
 5. Invoke the feature → `onshape_add_feature(feature=…)`. **Always check** `ok` and `notices` in the response — Onshape returns HTTP 200 even when a feature fails to regenerate.
 6. If the feature failed, `onshape_delete_feature(feature_id)` and try again with fixed FS.
 7. Verify with `onshape_list_features`.
+
+### Known limitation: bootstrapping a custom Feature Studio
+
+A Part Studio only "sees" a custom Feature Studio's exports after an
+explicit `BTMImport-136` is added to the Part Studio's feature list.
+Onshape's UI creates that import automatically the first time you pick a
+custom feature via `+ Custom feature…`, but **there is no documented REST
+endpoint for adding the import programmatically**. The `addPartStudioFeature`
+endpoint rejects `BTMImport-136` as a feature subtype, and the Onshape docs
+don't describe a dedicated imports-management endpoint.
+
+Practical consequence:
+
+- **Built-in features (cube, extrude, newSketch, fillet, etc.) work end-to-end via API** — use them freely.
+- **First-time use of a new custom Feature Studio** requires the user to pick it once via Onshape's UI to register the import. After that, `onshape_get_feature_studio_spec` returns its `namespace` and `onshape_add_feature` can invoke the custom type purely via API.
+
+If you find an undocumented endpoint or a workaround, PRs welcome.
 
 ## API usage limits
 
