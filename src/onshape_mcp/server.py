@@ -303,14 +303,16 @@ def onshape_update_feature_studio_code(
 def onshape_get_feature_studio_spec(
     document_id: str, workspace_id: str, element_id: str
 ) -> dict:
-    """Get the computed spec for every custom feature defined in a Feature Studio.
+    """Get all feature specs visible to a Part Studio (built-in + custom).
 
-    This is the canonical source for building `add_custom_feature` payloads:
-    it includes the `featureTypeHash`, `namespace`, and `parameterId`s /
-    types that Onshape expects. Call this after `update_feature_studio_code`.
+    `element_id` must be the **Part Studio** element id. The response lists
+    every custom feature defined in any Feature Studio in the same document,
+    with the `featureTypeHash`, `namespace`, and parameter schema Onshape
+    expects in `add_feature` payloads. Call this after
+    `update_feature_studio_code`.
     """
     data = client.get(
-        f"/api/v10/featurestudios/d/{document_id}/w/{workspace_id}/e/{element_id}/spec"
+        f"/api/v10/partstudios/d/{document_id}/w/{workspace_id}/e/{element_id}/featurespecs"
     )
     return data
 
@@ -318,11 +320,25 @@ def onshape_get_feature_studio_spec(
 @mcp.tool()
 @_safe
 def onshape_list_features(
-    document_id: str, workspace_id: str, element_id: str
+    document_id: str,
+    workspace_id: str,
+    element_id: str,
+    include_raw: Annotated[
+        bool,
+        "When True, return the full Onshape payload (features with all parameters, "
+        "imports, defaultFeatures) — use this to learn the exact JSON shape a "
+        "custom-feature add_feature call needs, per Onshape's 'inspect existing "
+        "Part Studios' guidance.",
+    ] = False,
 ) -> dict:
-    """List every feature in a Part Studio (id, name, type, status).
+    """List every feature in a Part Studio plus the Part Studio's imports.
 
-    Use this to verify what Claude built and to find ids for deletion.
+    The summary mode (default) returns featureId / name / featureType /
+    status for each feature, and every `BTMImport-136` the Part Studio
+    references (Onshape's standard library and any Feature Studios that have
+    been imported). Use `include_raw=True` to see full feature parameters —
+    necessary when reverse-engineering a custom-feature payload from a
+    Part Studio you set up manually.
     """
     data = client.get(
         f"/api/v10/partstudios/d/{document_id}/w/{workspace_id}/e/{element_id}/features"
@@ -342,6 +358,7 @@ def onshape_list_features(
                 "featureId": fid,
                 "name": f.get("name") or msg.get("name"),
                 "featureType": f.get("featureType") or msg.get("featureType"),
+                "namespace": f.get("namespace") or msg.get("namespace"),
                 "suppressed": f.get("suppressed")
                 if f.get("suppressed") is not None
                 else msg.get("suppressed"),
@@ -349,11 +366,15 @@ def onshape_list_features(
                 "statusMessage": state.get("message"),
             }
         )
-    return {
+    result = {
         "count": len(summary),
         "features": summary,
+        "imports": data.get("imports") or [],
         "sourceMicroversion": data.get("sourceMicroversion"),
     }
+    if include_raw:
+        result["raw"] = data
+    return result
 
 
 @mcp.tool()
@@ -395,6 +416,47 @@ def onshape_add_feature(
         json={"feature": feature},
     )
     return _summarize_feature_response(data)
+
+
+@mcp.tool()
+@_safe
+def onshape_post_feature_definition_call(
+    document_id: str,
+    workspace_id: str,
+    element_id: str,
+    body: Annotated[
+        dict,
+        "Full POST body for /features. Usually a BTFeatureDefinitionCall-1406, "
+        "but can carry extra keys like 'imports' alongside 'feature'. Use this "
+        "when the bare add_feature wrapper isn't enough (e.g. bootstrap-import "
+        "experiments).",
+    ],
+) -> dict:
+    """Low-level POST to `/partstudios/.../features` — dev/experimental escape hatch."""
+    data = client.post(
+        f"/api/v10/partstudios/d/{document_id}/w/{workspace_id}/e/{element_id}/features",
+        json=body,
+    )
+    return data
+
+
+@mcp.tool()
+@_safe
+def onshape_raw_post(
+    path: Annotated[str, "Full Onshape API path starting with /api/v10/..."],
+    body: dict | None = None,
+) -> dict:
+    """Low-level authenticated POST to any Onshape endpoint — dev/experimental."""
+    return client.post(path, json=body)
+
+
+@mcp.tool()
+@_safe
+def onshape_raw_get(
+    path: Annotated[str, "Full Onshape API path starting with /api/v10/..."],
+) -> dict:
+    """Low-level authenticated GET to any Onshape endpoint — dev/experimental."""
+    return client.get(path)
 
 
 def _is_error_notice(notice: dict) -> bool:
